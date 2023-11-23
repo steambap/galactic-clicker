@@ -7,15 +7,17 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/colorm"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"github.com/steambap/galactic-clicker/assets"
 )
 
 const (
-	SHIP_CONTROL_TOP_OFFSET = 70
+	SHIP_CONTROL_TOP_OFFSET = 96
 	SHIP_BOTTOM_PADDING     = 6
-	IMG_HEIGHT              = 75
+	IMG_SIZE                = 72
 	SHIP_COLUMN_WIDTH       = 410
 	BASE_PPI_BONUS          = 2
 	BG_LINE_WIDTH           = 2
@@ -23,9 +25,10 @@ const (
 	GAME_HEIGHT             = 576
 	STATUS_BAR_HEIGHT       = 64
 	BOTTOM_BAR_HEIGHT       = 64
+	NUM_EVENT_BUTTONS       = 5
+	EVENT_BUTTON_WIDTH      = 136
+	EVENT_BUTTON_HEIGHT     = 72
 )
-
-var GRID_COLOR = color.RGBA{R: 0, G: 0, B: 64, A: 255}
 
 func formatBigFloat(input float64) string {
 	digit := math.Log(input) * math.Log10E
@@ -37,13 +40,17 @@ func formatBigFloat(input float64) string {
 }
 
 type Game struct {
-	state          GameState
-	buyAmount      int
-	shipCost       []float64
-	shipControls   []*ShipBuyButton
-	shipLevel      []int
-	shipLevelMulti []float64
-	shipDPS        []float64
+	state             GameState
+	buyAmount         int
+	shipCost          []float64
+	shipLevel         []int
+	shipLevelMulti    []float64
+	shipDPS           []float64
+	newPpi            float64
+	finalEventInStage map[int]int
+	numEvents         map[int]int
+	eventButtons      []Button
+	curStage          int
 }
 
 func (g *Game) Update() error {
@@ -61,29 +68,33 @@ func (g *Game) Update() error {
 	}
 	g.state.CurMoney += newMoney
 	g.state.TotalMoney += newMoney
+	g.newPpi = math.Floor(math.Sqrt(g.state.TotalMoney / 1.0e12))
 	g.state.LastUpdate = newTime
+
+	for _, b := range g.eventButtons {
+		b.Update(g)
+	}
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	ebitenutil.DebugPrint(screen, formatBigFloat(g.state.CurMoney))
-
 	g.drawBackground(screen)
-	for _, c := range g.shipControls {
-		c.Draw(screen, g)
+	g.drawTitle(screen)
+	for _, b := range g.eventButtons {
+		b.Draw(screen, g)
 	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return 1024, 576
+	return GAME_WIDTH, GAME_HEIGHT
 }
 
 func (g *Game) onPressed() (captured bool) {
 	x, y := ebiten.CursorPosition()
 
-	for i, c := range g.shipControls {
-		if c.In(x, y) {
-			g.buyShip(i)
+	for _, b := range g.eventButtons {
+		if b.In(x, y) {
+			b.OnPressed(g)
 			return true
 		}
 	}
@@ -103,7 +114,20 @@ func (g *Game) drawBackground(screen *ebiten.Image) {
 		color.White, false)
 }
 
-func (g *Game) buyShip(shipID int) {
+func (g *Game) drawTitle(screen *ebiten.Image) {
+	title := "Galactic Clicker"
+	textCenter := getTextCenter(assets.Font36, title)
+	text.Draw(screen, title, assets.Font36, SHIP_COLUMN_WIDTH/2-int(textCenter), 36, color.White)
+
+	money := fmt.Sprintf("$ %s", formatBigFloat(g.state.CurMoney))
+	textCenter = getTextCenter(assets.Font36, money)
+	tx := (GAME_WIDTH+SHIP_COLUMN_WIDTH)/2 - int(textCenter)
+	text.Draw(screen, money, assets.Font36, tx, 36, color.White)
+
+	// render month,year
+}
+
+func (g *Game) buyShip(shipID int) bool {
 	cost := g.calculateCost(shipID)
 	if g.state.CurMoney >= cost {
 		g.state.CurMoney -= cost
@@ -111,7 +135,10 @@ func (g *Game) buyShip(shipID int) {
 		g.calculateDPS(shipID)
 		g.shipCost[shipID] = g.calculateCost(shipID)
 		// save game
+		return true
 	}
+
+	return false
 }
 
 func (g *Game) calculateCost(shipID int) float64 {
@@ -146,6 +173,27 @@ func (g *Game) getPPIBonus() float64 {
 	return float64(BASE_PPI_BONUS)
 }
 
+func (g *Game) initAmountButton() {
+	ls := []int{1, 10, 100}
+
+	w := 90
+	for i, a := range ls {
+		b := newBuyAmountButton(float64(w*i+5), 72, a)
+		g.eventButtons = append(g.eventButtons, b)
+	}
+}
+
+func (g *Game) initEventButtons() {
+	leftOffset := GAME_WIDTH - EVENT_BUTTON_WIDTH - 4
+	topOffset := STATUS_BAR_HEIGHT + 26
+
+	for i := 0; i < NUM_EVENT_BUTTONS; i++ {
+		button := newEventButton(leftOffset, topOffset, i)
+		g.eventButtons = append(g.eventButtons, button)
+		topOffset += EVENT_BUTTON_HEIGHT + 8
+	}
+}
+
 func NewGame() *Game {
 	g := &Game{
 		state: GameState{
@@ -153,12 +201,14 @@ func NewGame() *Game {
 			LastUpdate: time.Now(),
 			ShipCounts: []int{},
 		},
-		buyAmount:      1,
-		shipCost:       []float64{},
-		shipControls:   []*ShipBuyButton{},
-		shipLevel:      make([]int, 12),
-		shipLevelMulti: make([]float64, 12),
-		shipDPS:        make([]float64, 12),
+		buyAmount:         1,
+		shipCost:          []float64{},
+		shipLevel:         make([]int, 12),
+		shipLevelMulti:    make([]float64, 12),
+		shipDPS:           make([]float64, 12),
+		finalEventInStage: map[int]int{},
+		numEvents:         map[int]int{},
+		eventButtons:      []Button{},
 	}
 
 	leftOffset := 5
@@ -167,24 +217,42 @@ func NewGame() *Game {
 		g.state.ShipCounts = append(g.state.ShipCounts, 0)
 		g.shipCost = append(g.shipCost, g.calculateCost(i))
 		g.calculateDPS(i)
-		sb := &ShipBuyButton{
-			Sprite: Sprite{
-				image: shipDataTable[i].Img,
-				x:     leftOffset,
-				y:     topOffset,
-			},
-			shipID: i,
-		}
+		sb := newShipButton(float64(leftOffset), float64(topOffset), i, shipDataTable[i].Img)
 
-		g.shipControls = append(g.shipControls, sb)
+		g.eventButtons = append(g.eventButtons, sb)
 
 		if i == 5 {
 			leftOffset += SHIP_COLUMN_WIDTH / 2
 			topOffset = SHIP_CONTROL_TOP_OFFSET
 		} else {
-			topOffset += IMG_HEIGHT + SHIP_BOTTOM_PADDING
+			topOffset += IMG_SIZE + SHIP_BOTTOM_PADDING
 		}
 	}
 
+	prevStage := EARTH
+	for i := 0; i < len(eventDataTable); i++ {
+		stage := eventDataTable[i].Stage
+		if _, ok := g.numEvents[stage]; !ok {
+			g.numEvents[stage] = 0
+		}
+		g.numEvents[stage] += 1
+		if stage != prevStage {
+			g.finalEventInStage[prevStage] = i - 1
+			prevStage = stage
+		}
+	}
+	g.finalEventInStage[GALAXY] = len(eventDataTable) - 1
+	g.initAmountButton()
+	g.initEventButtons()
+
 	return g
+}
+
+func init() {
+	for i := range shipDataTable {
+		shipDataTable[i].Img = ebiten.NewImageFromImage(assets.ShipImageList[i])
+	}
+
+	grayScale = colorm.ColorM{}
+	grayScale.ChangeHSV(0, 0, 1)
 }

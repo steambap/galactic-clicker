@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "image/png"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -9,7 +10,7 @@ import (
 
 func main() {
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
-	ebiten.SetWindowSize(1024, 576)
+	ebiten.SetWindowSize(clicker.GAME_WIDTH, clicker.GAME_HEIGHT)
 	ebiten.SetWindowTitle("Galactic Clicker!")
 	g := clicker.NewGame()
 	if err := ebiten.RunGame(g); err != nil {

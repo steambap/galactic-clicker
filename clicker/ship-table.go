@@ -1,12 +1,7 @@
 package clicker
 
 import (
-	"bytes"
-	"image"
-	"log"
-
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/steambap/galactic-clicker/assets"
 )
 
 type ShipData struct {
@@ -41,17 +36,4 @@ var shipLevelCount [32]int = [32]int{
 var shipLevelMulti [32]float64 = [32]float64{
 	2, 2, 2, 2, 2, 2, 3, 2, 2, 2, 2, 5, 2, 2, 2, 2, 3, 2, 2, 2, 2, 3, 2, 2, 2,
 	2, 3, 2, 2, 2, 2, 4,
-}
-
-func init() {
-	// Decode an image from the image file's byte slice.
-	img, _, err := image.Decode(bytes.NewReader(assets.ShipBytes))
-	if err != nil {
-		log.Fatal(err)
-	}
-	shipImage := ebiten.NewImageFromImage(img)
-
-	for i := range shipDataTable {
-		shipDataTable[i].Img = shipImage
-	}
 }
