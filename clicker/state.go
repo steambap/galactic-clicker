@@ -12,5 +12,5 @@ type GameState struct {
 	PlayTime       int       `json:"playTime"`
 	PPI            float64   `json:"ppi"`
 	ShipCounts     []int     `json:"shipCOunts"`
-	EventPurchased []int     `json:"eventPurchased"`
+	EventPurchased []bool    `json:"eventPurchased"`
 }

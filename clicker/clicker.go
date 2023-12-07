@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	SHIP_CONTROL_TOP_OFFSET = 96
+	SHIP_CONTROL_TOP_OFFSET = 104
 	SHIP_BOTTOM_PADDING     = 6
 	IMG_SIZE                = 72
 	SHIP_COLUMN_WIDTH       = 410
@@ -49,8 +49,10 @@ type Game struct {
 	newPpi            float64
 	finalEventInStage map[int]int
 	numEvents         map[int]int
-	eventButtons      []Button
+	buttonList        []Button
+	eventButtons      []*EventButton
 	curStage          int
+	renderFeature     map[string]bool
 }
 
 func (g *Game) Update() error {
@@ -71,7 +73,7 @@ func (g *Game) Update() error {
 	g.newPpi = math.Floor(math.Sqrt(g.state.TotalMoney / 1.0e12))
 	g.state.LastUpdate = newTime
 
-	for _, b := range g.eventButtons {
+	for _, b := range g.buttonList {
 		b.Update(g)
 	}
 	return nil
@@ -80,7 +82,7 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawBackground(screen)
 	g.drawTitle(screen)
-	for _, b := range g.eventButtons {
+	for _, b := range g.buttonList {
 		b.Draw(screen, g)
 	}
 }
@@ -92,7 +94,7 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 func (g *Game) onPressed() (captured bool) {
 	x, y := ebiten.CursorPosition()
 
-	for _, b := range g.eventButtons {
+	for _, b := range g.buttonList {
 		if b.In(x, y) {
 			b.OnPressed(g)
 			return true
@@ -163,14 +165,31 @@ func (g *Game) calculateDPS(shipID int) {
 	g.shipLevel[shipID] = lv
 
 	shipDPS := float64(g.state.ShipCounts[shipID]) * shipDataTable[shipID].DPS
-	// Event bonus
+	eventBonus := 1.0
+	for i := 0; i < len(eventDataTable); i++ {
+		if g.state.EventPurchased[i] {
+			event := eventDataTable[i]
+			if event.Type1 == 12 || event.Type1 == shipID {
+				eventBonus *= event.Type2
+			}
+		}
+	}
 	ppiModifier := 1 + (g.state.PPI * g.getPPIBonus() / 100)
-	shipDPS = shipDPS * ppiModifier * g.shipLevelMulti[shipID]
+	shipDPS = shipDPS * eventBonus * ppiModifier * g.shipLevelMulti[shipID]
 	g.shipDPS[shipID] = shipDPS
 }
 
 func (g *Game) getPPIBonus() float64 {
-	return float64(BASE_PPI_BONUS)
+	sum := float64(BASE_PPI_BONUS)
+	for i := 0; i < len(eventDataTable); i++ {
+		if g.state.EventPurchased[i] {
+			event := eventDataTable[i]
+			if event.Type1 == 13 {
+				sum += event.Type2
+			}
+		}
+	}
+	return sum
 }
 
 func (g *Game) initAmountButton() {
@@ -179,7 +198,7 @@ func (g *Game) initAmountButton() {
 	w := 90
 	for i, a := range ls {
 		b := newBuyAmountButton(float64(w*i+5), 72, a)
-		g.eventButtons = append(g.eventButtons, b)
+		g.buttonList = append(g.buttonList, b)
 	}
 }
 
@@ -189,44 +208,71 @@ func (g *Game) initEventButtons() {
 
 	for i := 0; i < NUM_EVENT_BUTTONS; i++ {
 		button := newEventButton(leftOffset, topOffset, i)
+		g.buttonList = append(g.buttonList, button)
 		g.eventButtons = append(g.eventButtons, button)
 		topOffset += EVENT_BUTTON_HEIGHT + 8
 	}
 }
+
+func (g *Game) refreshEventButtons() {
+	events := make([]int, 0)
+	for i := 0; i < len(eventDataTable); i++ {
+		if !g.state.EventPurchased[i] {
+			events = append(events, i)
+			if len(events) >= NUM_EVENT_BUTTONS {
+				break
+			}
+		}
+	}
+	for j := 0; j < NUM_EVENT_BUTTONS-len(events); j++ {
+		events = append(events, -1)
+	}
+
+	for k := 0; k < NUM_EVENT_BUTTONS; k++ {
+		g.eventButtons[k].eventID = events[k]
+	}
+}
+
+func (g *Game) DrawSpace(screen *ebiten.Image) {
+	switch g.curStage {
+	case EARTH:
+		g.DrawEarth(screen)
+	case SYSTEM:
+		g.DrawSolarSystem(screen)
+	case SECTOR:
+		g.DrawSector(screen)
+	case GALAXY:
+		g.DrawGalaxy(screen)
+	}
+}
+
+func (g *Game) DrawEarth(screen *ebiten.Image) {
+
+}
+
+func (g *Game) DrawSolarSystem(screen *ebiten.Image) {}
+
+func (g *Game) DrawSector(screen *ebiten.Image) {}
+
+func (g *Game) DrawGalaxy(screen *ebiten.Image) {}
 
 func NewGame() *Game {
 	g := &Game{
 		state: GameState{
 			CurMoney:   4,
 			LastUpdate: time.Now(),
-			ShipCounts: []int{},
+			ShipCounts: make([]int, 12),
 		},
 		buyAmount:         1,
-		shipCost:          []float64{},
+		shipCost:          make([]float64, 12),
 		shipLevel:         make([]int, 12),
 		shipLevelMulti:    make([]float64, 12),
 		shipDPS:           make([]float64, 12),
 		finalEventInStage: map[int]int{},
 		numEvents:         map[int]int{},
-		eventButtons:      []Button{},
-	}
-
-	leftOffset := 5
-	topOffset := SHIP_CONTROL_TOP_OFFSET
-	for i := 0; i < len(shipDataTable); i++ {
-		g.state.ShipCounts = append(g.state.ShipCounts, 0)
-		g.shipCost = append(g.shipCost, g.calculateCost(i))
-		g.calculateDPS(i)
-		sb := newShipButton(float64(leftOffset), float64(topOffset), i, shipDataTable[i].Img)
-
-		g.eventButtons = append(g.eventButtons, sb)
-
-		if i == 5 {
-			leftOffset += SHIP_COLUMN_WIDTH / 2
-			topOffset = SHIP_CONTROL_TOP_OFFSET
-		} else {
-			topOffset += IMG_SIZE + SHIP_BOTTOM_PADDING
-		}
+		buttonList:        []Button{},
+		eventButtons:      []*EventButton{},
+		renderFeature:     map[string]bool{},
 	}
 
 	prevStage := EARTH
@@ -240,7 +286,26 @@ func NewGame() *Game {
 			g.finalEventInStage[prevStage] = i - 1
 			prevStage = stage
 		}
+		g.state.EventPurchased = append(g.state.EventPurchased, false)
 	}
+
+	leftOffset := 5
+	topOffset := SHIP_CONTROL_TOP_OFFSET
+	for i := 0; i < len(shipDataTable); i++ {
+		g.shipCost[i] = g.calculateCost(i)
+		g.calculateDPS(i)
+		sb := newShipButton(float64(leftOffset), float64(topOffset), i, shipDataTable[i].Img)
+
+		g.buttonList = append(g.buttonList, sb)
+
+		if i == 5 {
+			leftOffset += SHIP_COLUMN_WIDTH / 2
+			topOffset = SHIP_CONTROL_TOP_OFFSET
+		} else {
+			topOffset += IMG_SIZE + SHIP_BOTTOM_PADDING
+		}
+	}
+
 	g.finalEventInStage[GALAXY] = len(eventDataTable) - 1
 	g.initAmountButton()
 	g.initEventButtons()

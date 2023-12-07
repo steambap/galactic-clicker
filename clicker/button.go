@@ -9,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 	"github.com/steambap/galactic-clicker/assets"
+	"github.com/steambap/galactic-clicker/draw"
 	"golang.org/x/image/font"
 )
 
@@ -38,7 +39,7 @@ func (b *BaseButton) In(x, y int) bool {
 }
 
 func (b *BaseButton) Draw(screen *ebiten.Image) {
-	vector.StrokeRect(screen, float32(b.x), float32(b.y), float32(b.width), float32(b.height), 2, color.White, true)
+	draw.StrokeRoundedRect(screen, float32(b.x), float32(b.y), float32(b.width), float32(b.height))
 }
 
 func (b *BaseButton) Update(g *Game) {}
@@ -58,16 +59,19 @@ func (b *EventButton) isVisible(g *Game) bool {
 	}
 	event := eventDataTable[b.eventID]
 
-	return event.Stage == g.curStage
+	return event.Stage <= g.curStage
 }
 
 func (b *EventButton) Draw(screen *ebiten.Image, g *Game) {
 	if !b.isVisible(g) {
 		return
 	}
-	b.BaseButton.Draw(screen)
 
 	event := eventDataTable[b.eventID]
+	if g.state.CurMoney < event.Cost {
+		vector.DrawFilledRect(screen, float32(b.x), float32(b.y), float32(b.width), float32(b.height), disableColor, true)
+	}
+	b.BaseButton.Draw(screen)
 
 	// Title
 	text.Draw(screen, event.Title, assets.Font20, int(b.x)+2, int(b.y)+18, color.White)
@@ -83,7 +87,7 @@ func (b *EventButton) Draw(screen *ebiten.Image, g *Game) {
 		// production multiplier
 		hintLabel = fmt.Sprintf("Production x%v", int(event.Type2))
 	} else {
-		hintLabel = fmt.Sprintf("PPI +%.1f%", event.Type2)
+		hintLabel = fmt.Sprintf("PPI +%.1f%%", event.Type2)
 	}
 	text.Draw(screen, hintLabel, assets.Font14, int(b.x)+2, int(b.y)+54, color.White)
 
@@ -93,6 +97,34 @@ func (b *EventButton) Draw(screen *ebiten.Image, g *Game) {
 		featLabel = "!"
 	}
 	text.Draw(screen, featLabel, assets.Font24, int(b.x)+EVENT_BUTTON_WIDTH-10, int(b.y)+EVENT_BUTTON_HEIGHT-14, color.White)
+}
+
+func (b *EventButton) OnPressed(g *Game) bool {
+	event := eventDataTable[b.eventID]
+	if g.state.CurMoney > event.Cost {
+		g.state.CurMoney -= event.Cost
+		g.state.EventPurchased[b.eventID] = true
+		stage := event.Stage
+		g.numEvents[stage] += 1
+		if event.Feature != "" {
+			g.renderFeature[event.Feature] = true
+		}
+		for i := 0; i < len(shipDataTable); i++ {
+			g.calculateDPS(i)
+			g.shipCost[i] = g.calculateCost(i)
+		}
+		if g.finalEventInStage[g.curStage] == b.eventID && g.curStage != GALAXY {
+			g.curStage += 1
+		}
+		g.refreshEventButtons()
+		// save game
+
+		return true
+	} else {
+		g.state.CurMoney += event.Cost
+	}
+
+	return false
 }
 
 func newEventButton(x, y int, eventID int) *EventButton {
@@ -131,7 +163,7 @@ func (b *BuyAmountButton) Draw(screen *ebiten.Image, g *Game) {
 		vector.DrawFilledRect(screen, float32(b.x), float32(b.y), float32(b.width), float32(b.height), disableColor, true)
 	}
 	b.BaseButton.Draw(screen)
-	text.Draw(screen, fmt.Sprint(b.amount), assets.Font20, int(b.x+b.dx), int(b.y+b.height), color.White)
+	text.Draw(screen, fmt.Sprint(b.amount), assets.Font20, int(b.x+b.dx), int(b.y+b.height)-2, color.White)
 }
 
 func newBuyAmountButton(x, y float64, amount int) *BuyAmountButton {
@@ -141,7 +173,7 @@ func newBuyAmountButton(x, y float64, amount int) *BuyAmountButton {
 		BaseButton: BaseButton{
 			x: x, y: y,
 			width:  IMG_SIZE,
-			height: h,
+			height: h + 4,
 		},
 		amount: amount,
 		dx:     IMG_SIZE/2 - w/2,
@@ -177,11 +209,11 @@ func (b *ShipButton) Draw(screen *ebiten.Image, g *Game) {
 	leftOffset := IMG_SIZE + 5
 	topOffset := 24
 	// name
-	text.Draw(screen, shipDataTable[b.shipID].Name, assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset, color.White)
+	text.Draw(screen, shipDataTable[b.shipID].Name, assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset-4, color.White)
 	// cost
-	text.Draw(screen, "$"+formatBigFloat(g.shipCost[b.shipID]), assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset*2, color.White)
+	text.Draw(screen, "$"+formatBigFloat(g.shipCost[b.shipID]), assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset*2-4, color.White)
 	// dps per ship
-	text.Draw(screen, formatBigFloat(g.shipDPS[b.shipID])+" /s", assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset*3, color.White)
+	text.Draw(screen, formatBigFloat(g.shipDPS[b.shipID])+" /s", assets.Font20, int(b.x)+leftOffset, int(b.y)+topOffset*3-4, color.White)
 	// ship count
 	countLabel := fmt.Sprintf("%v", g.state.ShipCounts[b.shipID])
 	if countLabel == "0" {
